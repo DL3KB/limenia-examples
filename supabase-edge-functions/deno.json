@@ -1,0 +1,18 @@
+{
+  "tasks": {
+    "test": "deno test --allow-env supabase/functions/tests/",
+    "check": "deno check supabase/functions/*/index.ts supabase/functions/tests/*.ts",
+    "lint": "deno lint supabase/functions && deno fmt --check supabase/functions"
+  },
+  "fmt": {
+    "lineWidth": 140
+  },
+  "lock": false,
+  "lint": {
+    "rules": {
+      "exclude": [
+        "no-import-prefix"
+      ]
+    }
+  }
+}

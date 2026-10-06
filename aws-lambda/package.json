@@ -1,0 +1,16 @@
+{
+  "name": "limenia-example-aws-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Limenia integration example: AWS Lambda (Node.js 20) behind a Function URL or an API Gateway HTTP API",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/handler.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "package": "rm -f function.zip && zip -r function.zip src package.json"
+  }
+}

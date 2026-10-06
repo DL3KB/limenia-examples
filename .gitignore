@@ -1,0 +1,40 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+.secret.local
+*.pem
+
+# Node
+node_modules/
+npm-debug.log*
+coverage/
+*.zip
+
+# Firebase
+.firebase/
+firebase-debug.log*
+.firebaserc
+
+# Supabase
+supabase/.branches/
+supabase/.temp/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Go
+/go/bin/
+
+# PHP
+vendor/
+.phpunit.result.cache
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,9 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "limenia",
+      "ignore": ["node_modules", "test", ".env.example", "*.local"]
+    }
+  ]
+}
