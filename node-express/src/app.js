@@ -61,6 +61,7 @@ export function createApp({ limenia, webhookSecrets, actions, eventStore = new M
       source: "user",
       reasonCategory: b.reasonCategory,
       reasonText: b.reasonText,
+      goodFaith: b.goodFaith, // Art. 16(2)(d) DSA, only for source "user"
       reporter: { externalUserId: req.user.id }, // from the login, never from the app
       // The reported user (for content: its author). Better: load the content and its
       // author from your database by ID instead of trusting what the app sends.

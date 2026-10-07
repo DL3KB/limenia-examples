@@ -101,7 +101,7 @@ curl -i -X POST localhost:8080/limenia/webhook \
 
 ### Reports
 
-- `source` is always `user`, and `reporter.externalUserId` comes from the login, never from the request body. The other fields (`reasonCategory`, `reasonText`, `subject`, `content`, `externalReportId`) are passed on. In a real app, load `subject` and `content` from your own database by ID instead of trusting what the app sends.
+- `source` is always `user`, and `reporter.externalUserId` comes from the login, never from the request body. The other fields (`reasonCategory`, `reasonText`, `goodFaith`, `subject`, `content`, `externalReportId`) are passed on. In a real app, load `subject` and `content` from your own database by ID instead of trusting what the app sends.
 - `Idempotency-Key` is required by Limenia. The app should create one key per report, keep it, and resend it with every retry of that report. Without a key, this backend generates one; it then only protects its own retries. The key is returned in the `Idempotency-Key` response header.
 - Network errors, `429` and `5xx` are retried up to 5 times with backoff of 1, 2, 4 and 8 seconds, waiting at least `Retry-After`. A `Retry-After` above 30 seconds is passed on to the app instead. Other `4xx` are never retried.
 - Limenia's status, body (`application/problem+json` for errors) and `Retry-After` are passed on unchanged. If the report still fails, queue it and send it again within 24 hours with the same key.

@@ -31,7 +31,7 @@ MAX_WEBHOOK_BODY = 1 << 20
 REQUEST_HASH_TTL_SECONDS = 600  # Limenia rejects device tokens older than 15 minutes
 
 # Fields the app may set in a report. `source` and `reporter` are set here.
-REPORT_FIELDS = ("reasonCategory", "reasonText", "subject", "content", "externalReportId")
+REPORT_FIELDS = ("reasonCategory", "reasonText", "goodFaith", "subject", "content", "externalReportId")
 
 
 @dataclass

@@ -17,7 +17,7 @@ const requestHashTTL = 10 * time.Minute
 
 // reportFields are the fields the app may set in a report. source and
 // reporter are set by the backend.
-var reportFields = []string{"reasonCategory", "reasonText", "subject", "content", "externalReportId"}
+var reportFields = []string{"reasonCategory", "reasonText", "goodFaith", "subject", "content", "externalReportId"}
 
 type Server struct {
 	limenia   *Client

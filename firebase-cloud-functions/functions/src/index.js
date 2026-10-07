@@ -33,7 +33,7 @@ function requireUid(request) {
 }
 
 // ---- Report content or a user ------------------------------------------------
-// data: { reasonCategory, reasonText?, subject?, content?, externalReportId?, idempotencyKey }
+// data: { reasonCategory, reasonText?, goodFaith?, subject?, content?, externalReportId?, idempotencyKey }
 // Up to 5 attempts with 1, 2, 4, 8 s pause: allow more than the default 60 s.
 export const submitReport = onCall({ secrets: [LIMENIA_API_KEY], timeoutSeconds: 120 }, async (request) => {
   const uid = requireUid(request);
@@ -42,6 +42,7 @@ export const submitReport = onCall({ secrets: [LIMENIA_API_KEY], timeoutSeconds:
     source: "user",
     reasonCategory: d.reasonCategory,
     reasonText: d.reasonText,
+    goodFaith: d.goodFaith, // Art. 16(2)(d) DSA, only for source "user"
     reporter: { externalUserId: uid }, // from the login, never from the app
     // The reported user (for content: its author). Better: read the content and its
     // author from Firestore by ID instead of trusting what the app sends.

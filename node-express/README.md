@@ -78,7 +78,7 @@ For a real delivery, expose the server with a tunnel (any HTTPS tunnel works), e
 
 ## How it behaves
 
-**Reports, complaints, review requests.** The backend builds the request from an allowlist of fields and sets the person from the login: `reporter.externalUserId`, `appellant.externalUserId`, `subject.externalUserId` of a review. `source` is always `user`, and only `reasonCategory`, `reasonText`, `subject`, `content` and `externalReportId` are passed on. The app should create one `Idempotency-Key` per report and send it again on every retry; without one the backend generates `report-<uuid>`, which only covers its own retries. The key used comes back in the response header `Idempotency-Key`.
+**Reports, complaints, review requests.** The backend builds the request from an allowlist of fields and sets the person from the login: `reporter.externalUserId`, `appellant.externalUserId`, `subject.externalUserId` of a review. `source` is always `user`, and only `reasonCategory`, `reasonText`, `goodFaith`, `subject`, `content` and `externalReportId` are passed on. The app should create one `Idempotency-Key` per report and send it again on every retry; without one the backend generates `report-<uuid>`, which only covers its own retries. The key used comes back in the response header `Idempotency-Key`.
 
 **Errors.** Limenia's status, its `application/problem+json` body and `Retry-After` go to the app unchanged, so the app can show field errors (`errors`), `reporterWarning` and `reporter_suspended` with `suspendedUntil`. No answer at all becomes `502 limenia_unreachable`. A `401` from Limenia means the backend's API key is wrong; the app must not sign the user out because of it.
 

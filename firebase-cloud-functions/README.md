@@ -85,7 +85,7 @@ curl -X POST "http://127.0.0.1:5001/<your-project>/europe-west3/getMyModerationS
 
 **Errors.** `callLimenia` returns Limenia's body on success. Otherwise it throws an `HttpsError` with `details: { status, problem, retryAfter, idempotencyKey }` (the key used, so the app can retry with it): `400` becomes `invalid-argument`, `402` and `409` `failed-precondition`, `403` `permission-denied`, `404` `not-found`, `429` `resource-exhausted`, `5xx` `unavailable`. A `401` from Limenia means the API key is wrong and becomes `internal`, not `unauthenticated`, so the app does not sign the user out.
 
-**Reports.** The function sets `source: "user"` and `reporter.externalUserId` from `request.auth.uid` and passes on only `reasonCategory`, `reasonText`, `subject`, `content` and `externalReportId`. The app sends `idempotencyKey` in the payload (one per report, the same on every retry); without one the function generates `report-<uuid>`.
+**Reports.** The function sets `source: "user"` and `reporter.externalUserId` from `request.auth.uid` and passes on only `reasonCategory`, `reasonText`, `goodFaith`, `subject`, `content` and `externalReportId`. The app sends `idempotencyKey` in the payload (one per report, the same on every retry); without one the function generates `report-<uuid>`.
 
 **Retries.** Network errors, timeouts (30 s), `429` and `5xx` are retried up to five attempts with 1, 2, 4 and 8 s pause, at least `Retry-After`; a `Retry-After` above 30 s goes back to the app. Every attempt sends the same body and key. `submitReport` therefore has a timeout of 120 s; give `httpsCallable` a matching `timeout` option in the app (its default is 70 s).
 

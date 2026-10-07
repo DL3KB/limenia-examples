@@ -99,7 +99,7 @@ The anon key alone is no user: the functions ask Supabase Auth for the user behi
 
 ## How it behaves
 
-**Reports.** The function sets `source: "user"` and `reporter.externalUserId` from the JWT and passes on only `reasonCategory`, `reasonText`, `subject`, `content` and `externalReportId`. The `Idempotency-Key` of the app is passed through, or `report-<uuid>` is generated, and comes back in the response header. Limenia's status, problem body and `Retry-After` reach the app unchanged. No answer at all becomes `502 limenia_unreachable`. A `401` from Limenia means the API key is wrong, not that the user is signed out.
+**Reports.** The function sets `source: "user"` and `reporter.externalUserId` from the JWT and passes on only `reasonCategory`, `reasonText`, `goodFaith`, `subject`, `content` and `externalReportId`. The `Idempotency-Key` of the app is passed through, or `report-<uuid>` is generated, and comes back in the response header. Limenia's status, problem body and `Retry-After` reach the app unchanged. No answer at all becomes `502 limenia_unreachable`. A `401` from Limenia means the API key is wrong, not that the user is signed out.
 
 **Retries.** Network errors, timeouts (30 s), `429` and `5xx` are retried up to five attempts with 1, 2, 4 and 8 s pause, at least `Retry-After`; a `Retry-After` above 30 s goes back to the app.
 

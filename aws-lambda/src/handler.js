@@ -124,6 +124,7 @@ export function createHandler({ env = process.env, limenia, actions = defaultAct
         source: "user",
         reasonCategory: body.reasonCategory,
         reasonText: body.reasonText,
+        goodFaith: body.goodFaith, // Art. 16(2)(d) DSA, only for source "user"
         reporter: { externalUserId: userId }, // from the login, never from the app
         // Better: load the content and its author from your database by ID.
         subject: body.subject,

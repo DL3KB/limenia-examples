@@ -18,7 +18,7 @@ use Symfony\Component\HttpFoundation\Response;
 class LimeniaController extends Controller
 {
     /** Fields the app may set in a report. source and reporter are set here. */
-    private const REPORT_FIELDS = ['reasonCategory', 'reasonText', 'subject', 'content', 'externalReportId'];
+    private const REPORT_FIELDS = ['reasonCategory', 'reasonText', 'goodFaith', 'subject', 'content', 'externalReportId'];
 
     public function __construct(private readonly LimeniaClient $limenia)
     {
