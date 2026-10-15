@@ -28,8 +28,13 @@ class FakeLimenia:
 
 
 @pytest.fixture
-def make_client():
-    def make(*responses):
+def make_client(monkeypatch):
+    def make(*responses, dev_auth=True):
+        # The X-User-Id fallback is off by default; most tests need it on.
+        if dev_auth:
+            monkeypatch.setenv("LIMENIA_EXAMPLE_INSECURE_DEV_AUTH", "1")
+        else:
+            monkeypatch.delenv("LIMENIA_EXAMPLE_INSECURE_DEV_AUTH", raising=False)
         fake = FakeLimenia(*responses)
         waits: list[float] = []
 
@@ -72,8 +77,43 @@ def test_report_sets_reporter_and_passes_key(make_client):
 
 def test_report_requires_login(make_client):
     client, fake, _ = make_client()
-    assert client.post("/reports", json={}).status_code == 401
+    response = client.post("/reports", json={})
+    assert response.status_code == 401
+    assert response.json()["code"] == "unauthenticated"
     assert fake.requests == []
+
+
+def test_without_dev_auth_every_app_route_answers_auth_not_configured(make_client):
+    client, fake, _ = make_client(dev_auth=False)
+    headers = {"X-User-Id": "u_1"}
+    routes = [
+        ("POST", "/reports"),
+        ("GET", "/me/moderation-status"),
+        ("POST", "/devices/request-hash"),
+        ("POST", "/devices/check"),
+    ]
+    for method, path in routes:
+        response = client.request(method, path, json={"reasonCategory": "spam"}, headers=headers)
+        assert response.status_code == 401, path
+        assert response.headers["Content-Type"] == "application/problem+json"
+        assert response.json()["code"] == "auth_not_configured", path
+    assert fake.requests == []
+
+
+def test_report_forwards_only_external_user_id_and_display_name_of_the_subject(make_client):
+    client, fake, _ = make_client(created(), created())
+    headers = {"X-User-Id": "u_1"}
+    subject = {
+        "externalUserId": "u_2",
+        "displayName": "Eve",
+        "identifiers": {"emailHmac": "abc", "phoneHmac": "def"},
+        "extra": "x",
+    }
+    client.post("/reports", json={"reasonCategory": "spam", "subject": subject}, headers=headers)
+    client.post("/reports", json={"reasonCategory": "spam", "subject": {"identifiers": {"emailHmac": "abc"}}}, headers=headers)
+
+    assert json.loads(fake.requests[0].content)["subject"] == {"externalUserId": "u_2", "displayName": "Eve"}
+    assert "subject" not in json.loads(fake.requests[1].content)
 
 
 def test_report_retries_with_same_key_and_respects_retry_after(make_client):

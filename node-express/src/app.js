@@ -65,7 +65,7 @@ export function createApp({ limenia, webhookSecrets, actions, eventStore = new M
       reporter: { externalUserId: req.user.id }, // from the login, never from the app
       // The reported user (for content: its author). Better: load the content and its
       // author from your database by ID instead of trusting what the app sends.
-      subject: b.subject,
+      subject: reportSubject(b.subject),
       content: b.content,
       externalReportId: b.externalReportId,
     };
@@ -158,6 +158,20 @@ export function createApp({ limenia, webhookSecrets, actions, eventStore = new M
   });
 
   return app;
+}
+
+/**
+ * The reported user, rebuilt from what the app sent: only externalUserId and displayName.
+ *
+ * Never forward identifiers from the app. To use ban evasion across apps, add
+ * subject.identifiers here from your own user record of the reported user
+ * (HMACs with your identifier key, see https://limenia.eu/docs/identifiers/).
+ */
+function reportSubject(raw) {
+  if (typeof raw?.externalUserId !== "string") return undefined;
+  const subject = { externalUserId: raw.externalUserId };
+  if (typeof raw.displayName === "string") subject.displayName = raw.displayName;
+  return subject;
 }
 
 /**

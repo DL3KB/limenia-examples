@@ -4,10 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 )
@@ -16,8 +18,8 @@ import (
 const requestHashTTL = 10 * time.Minute
 
 // reportFields are the fields the app may set in a report. source and
-// reporter are set by the backend.
-var reportFields = []string{"reasonCategory", "reasonText", "goodFaith", "subject", "content", "externalReportId"}
+// reporter are set by the backend; subject is rebuilt by reportSubject.
+var reportFields = []string{"reasonCategory", "reasonText", "goodFaith", "content", "externalReportId"}
 
 type Server struct {
 	limenia   *Client
@@ -54,23 +56,70 @@ func (s *Server) Routes() http.Handler {
 	return mux
 }
 
-// currentUser: REPLACE WITH YOUR LOGIN. This stub trusts an X-User-Id
-// header so the example runs without an auth system. Return the stable
-// internal ID of the signed-in user (the same ID you use as externalUserId).
-func currentUser(r *http.Request) (string, bool) {
+// insecureDevAuthEnv turns on the X-User-Id header fallback of currentUser.
+const insecureDevAuthEnv = "LIMENIA_EXAMPLE_INSECURE_DEV_AUTH"
+
+func insecureDevAuth() bool { return os.Getenv(insecureDevAuthEnv) == "1" }
+
+var (
+	errAuthNotConfigured = errors.New("no login configured")
+	errNotSignedIn       = errors.New("not signed in")
+)
+
+// currentUser: REPLACE WITH YOUR LOGIN. Return the stable internal ID of the
+// signed-in user (the same ID you use as externalUserId) from your session or
+// token check, and errNotSignedIn when there is none.
+//
+// The X-User-Id fallback below is for local testing only. It is enabled only
+// by LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1, and anyone can send that header.
+// Never set the variable in a deployed environment.
+func currentUser(r *http.Request) (string, error) {
+	if !insecureDevAuth() {
+		return "", errAuthNotConfigured
+	}
 	id := r.Header.Get("X-User-Id")
-	return id, id != ""
+	if id == "" {
+		return "", errNotSignedIn
+	}
+	return id, nil
 }
 
 func (s *Server) withUser(h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := currentUser(r)
-		if !ok {
+		userID, err := currentUser(r)
+		if errors.Is(err, errAuthNotConfigured) {
+			writeProblem(w, http.StatusUnauthorized, "auth_not_configured",
+				"No login configured: replace the auth placeholder with your own login.")
+			return
+		}
+		if err != nil {
 			writeProblem(w, http.StatusUnauthorized, "unauthenticated", "Not signed in")
 			return
 		}
 		h(w, r, userID)
 	}
+}
+
+// reportSubject rebuilds the reported user from what the app sent. Only
+// externalUserId and displayName are taken over.
+//
+// Never forward identifiers from the app. To use ban evasion across apps, add
+// subject.identifiers here from your own user record of the reported user
+// (HMACs with your identifier key, see https://limenia.eu/docs/identifiers/).
+func reportSubject(raw json.RawMessage) map[string]string {
+	var in map[string]any
+	if json.Unmarshal(raw, &in) != nil {
+		return nil
+	}
+	id, ok := in["externalUserId"].(string)
+	if !ok {
+		return nil
+	}
+	subject := map[string]string{"externalUserId": id}
+	if name, ok := in["displayName"].(string); ok {
+		subject["displayName"] = name
+	}
+	return subject
 }
 
 func (s *Server) createReport(w http.ResponseWriter, r *http.Request, userID string) {
@@ -84,6 +133,11 @@ func (s *Server) createReport(w http.ResponseWriter, r *http.Request, userID str
 		if v, ok := in[k]; ok {
 			report[k] = v
 		}
+	}
+	// The reported user (for content: its author). Better: load it from your
+	// own database by ID instead of trusting what the app sends.
+	if subject := reportSubject(in["subject"]); subject != nil {
+		report["subject"] = subject
 	}
 	report["source"] = "user"
 	report["reporter"] = map[string]string{"externalUserId": userID} // from the login, never from the body

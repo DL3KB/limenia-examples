@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.responses import JSONResponse
 
 from . import webhooks
@@ -30,8 +30,11 @@ log = logging.getLogger("limenia.example")
 MAX_WEBHOOK_BODY = 1 << 20
 REQUEST_HASH_TTL_SECONDS = 600  # Limenia rejects device tokens older than 15 minutes
 
-# Fields the app may set in a report. `source` and `reporter` are set here.
-REPORT_FIELDS = ("reasonCategory", "reasonText", "goodFaith", "subject", "content", "externalReportId")
+# Fields the app may set in a report. `source` and `reporter` are set here;
+# `subject` is rebuilt by report_subject().
+REPORT_FIELDS = ("reasonCategory", "reasonText", "goodFaith", "content", "externalReportId")
+
+INSECURE_DEV_AUTH_ENV = "LIMENIA_EXAMPLE_INSECURE_DEV_AUTH"
 
 
 @dataclass
@@ -54,13 +57,47 @@ class Config:
         )
 
 
+class ProblemError(Exception):
+    """Answered as application/problem+json by the handler in create_app()."""
+
+    def __init__(self, status: int, code: str, detail: str) -> None:
+        self.status, self.code, self.detail = status, code, detail
+
+
+def insecure_dev_auth() -> bool:
+    return os.environ.get(INSECURE_DEV_AUTH_ENV) == "1"
+
+
 def current_user(x_user_id: str | None = Header(default=None)) -> str:
-    """REPLACE WITH YOUR LOGIN. This stub trusts an `X-User-Id` header so the
-    example runs without an auth system. Return the stable internal ID of the
-    signed-in user (the same ID you use as `externalUserId` in reports)."""
+    """REPLACE WITH YOUR LOGIN. Return the stable internal ID of the signed-in
+    user (the same ID you use as `externalUserId` in reports) from your session
+    or token check.
+
+    The `X-User-Id` fallback below is for local testing only. It is enabled
+    only by LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1, and anyone can send that
+    header. Never set the variable in a deployed environment."""
+    if not insecure_dev_auth():
+        raise ProblemError(
+            401, "auth_not_configured", "No login configured: replace the auth placeholder with your own login."
+        )
     if not x_user_id:
-        raise HTTPException(status_code=401, detail="not signed in")
+        raise ProblemError(401, "unauthenticated", "Not signed in")
     return x_user_id
+
+
+def report_subject(raw: Any) -> dict[str, str] | None:
+    """The reported user, rebuilt from what the app sent: only `externalUserId`
+    and `displayName` are taken over.
+
+    Never forward identifiers from the app. To use ban evasion across apps, add
+    subject.identifiers here from your own user record of the reported user
+    (HMACs with your identifier key, see https://limenia.eu/docs/identifiers/)."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("externalUserId"), str):
+        return None
+    subject = {"externalUserId": raw["externalUserId"]}
+    if isinstance(raw.get("displayName"), str):
+        subject["displayName"] = raw["displayName"]
+    return subject
 
 
 def problem(status: int, code: str, detail: str) -> JSONResponse:
@@ -91,6 +128,12 @@ def create_app(
     sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> FastAPI:
     config = config or Config.from_env()
+    if insecure_dev_auth():
+        log.warning(
+            "%s=1: the X-User-Id header is trusted as the signed-in user. For local testing only. "
+            "Anyone can send that header. Never set it in a deployed environment.",
+            INSECURE_DEV_AUTH_ENV,
+        )
     client_args: dict[str, Any] = {"transport": transport}
     if sleep is not None:
         client_args["sleep"] = sleep
@@ -107,6 +150,10 @@ def create_app(
 
     app = FastAPI(title="Limenia example backend", lifespan=lifespan)
 
+    @app.exception_handler(ProblemError)
+    async def problem_error(_: Request, err: ProblemError) -> JSONResponse:
+        return problem(err.status, err.code, err.detail)
+
     @app.post("/reports")
     async def create_report(
         request: Request,
@@ -121,6 +168,10 @@ def create_app(
             return problem(400, "bad_request", "Body must be a JSON object")
 
         report = {k: body[k] for k in REPORT_FIELDS if k in body}
+        # The reported user (for content: its author). Better: load it from your
+        # own database by ID instead of trusting what the app sends.
+        if (subject := report_subject(body.get("subject"))) is not None:
+            report["subject"] = subject
         report["source"] = "user"
         report["reporter"] = {"externalUserId": user_id}  # from the login, never from the body
 

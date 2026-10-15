@@ -56,6 +56,8 @@ All seven:
 
 The serverless examples (Firebase, Lambda, Supabase) keep no memory between calls. Instead of storing the device request hash for 10 minutes, they hand the app a signed ticket with the nonce and an expiry, and recompute the hash from it.
 
+The Go, Python, Node, PHP and Lambda examples ship a **login placeholder** instead of a real login: every app route answers `401` with the code `auth_not_configured` until you replace it with your own session or token check (the Lambda example also accepts the verified claims of an API Gateway JWT authorizer). For local testing only, start the server with `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1`; it then trusts the header `X-User-Id` as the signed-in user, and anyone can send that header. Never set it in a deployed environment. The Firebase and Supabase examples use the login of their platform and need no placeholder.
+
 Each example has its own README with setup, run, curl examples, deployment hints and tests.
 
 ## Security rules
@@ -63,7 +65,7 @@ Each example has its own README with setup, run, curl examples, deployment hints
 These hold for every integration, whatever the language:
 
 1. **The API key never goes into the app.** Not in the binary, not in a config file, not in a remote config. The app talks to your backend only.
-2. **The backend sets the people.** `reporter.externalUserId` of a report, `appellant.externalUserId` of a complaint and the author of a review come from your own login, never from the request body. Use a stable internal user ID, not an e-mail address.
+2. **The backend sets the people.** `reporter.externalUserId` of a report, `appellant.externalUserId` of a complaint and the author of a review come from your own login, never from the request body. Use a stable internal user ID, not an e-mail address. Likewise `subject.identifiers` of a report (HMACs of e-mail or phone number, used for ban evasion across apps) are never forwarded from the app: only your backend can compute them, from its own user record of the reported user, with your identifier key. The examples pass on only `externalUserId` and `displayName` of the `subject`.
 3. **Verify every webhook on the raw body.** Check `Limenia-Signature` on the bytes exactly as received, before parsing. Parsing and re-serializing JSON changes the bytes and breaks the signature.
 4. **Dedupe by event ID.** Limenia delivers at least once: the same event can arrive again with the same `id` and a new signature. Remember processed IDs, mark an event processed only after handling it, and make actions idempotent (set a state, do not toggle it).
 5. **Use idempotency keys.** `POST /v1/reports`, `/v1/appeals` and `/v1/reviews` require an `Idempotency-Key`. Create one key per report in the app, keep it, and send the same key with the same body on every retry. The same key with a different body is rejected (`409 idempotency_key_reused`).

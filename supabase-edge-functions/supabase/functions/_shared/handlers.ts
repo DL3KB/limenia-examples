@@ -30,6 +30,20 @@ async function readJson(req: Request): Promise<Record<string, unknown> | null> {
   }
 }
 
+/**
+ * The reported user, rebuilt from what the app sent: only externalUserId and displayName.
+ *
+ * Never forward identifiers from the app. To use ban evasion across apps, add
+ * subject.identifiers here from your own user record of the reported user
+ * (HMACs with your identifier key, see https://limenia.eu/docs/identifiers/).
+ */
+function reportSubject(raw: unknown): { externalUserId: string; displayName?: string } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { externalUserId, displayName } = raw as Record<string, unknown>;
+  if (typeof externalUserId !== "string") return undefined;
+  return typeof displayName === "string" ? { externalUserId, displayName } : { externalUserId };
+}
+
 // POST limenia-reports: report content or a user. The reporter is the signed-in user.
 export function createReportsHandler(deps: { limenia: LimeniaApi; userFromRequest: UserResolver }): Handler {
   return appRoute("POST", deps.userFromRequest, async (req, userId) => {
@@ -43,7 +57,7 @@ export function createReportsHandler(deps: { limenia: LimeniaApi; userFromReques
       reporter: { externalUserId: userId }, // from the login, never from the app
       // The reported user (for content: its author). Better: load the content and its
       // author from your tables by ID instead of trusting what the app sends.
-      subject: b.subject,
+      subject: reportSubject(b.subject),
       content: b.content,
       externalReportId: b.externalReportId,
     };

@@ -22,6 +22,11 @@ func main() {
 		secrets = append(secrets, previous) // only while rotating
 	}
 
+	if insecureDevAuth() {
+		slog.Warn(insecureDevAuthEnv + "=1: the X-User-Id header is trusted as the signed-in user. " +
+			"For local testing only. Anyone can send that header. Never set it in a deployed environment.")
+	}
+
 	srv := NewServer(NewClient(baseURL, apiKey), placeholderActions{}, secrets...)
 	addr := ":" + getenv("PORT", "8080")
 	slog.Info("listening", "addr", addr)

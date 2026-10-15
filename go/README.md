@@ -15,7 +15,7 @@ The app never talks to Limenia directly and never sees the API key.
 ## Files
 
 - `main.go`: configuration and server start
-- `server.go`: routes, the login stub, reports, status and device check
+- `server.go`: routes, the login placeholder, reports, status and device check
 - `limenia.go`: HTTP client with retries, and the device request hash
 - `signature.go`: verification of `Limenia-Signature`
 - `webhook.go`: webhook handler, event types and what to do per event
@@ -37,6 +37,7 @@ cp .env.example .env   # then fill in your values
 | `LIMENIA_WEBHOOK_SECRET` | yes | Webhook secret of your app |
 | `LIMENIA_WEBHOOK_SECRET_PREVIOUS` | no | The previous secret, only while you rotate it |
 | `PORT` | no | Port of this server, default `8080` |
+| `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH` | no | Set to `1` for local testing only: trusts the `X-User-Id` header as the signed-in user. Never set it in a deployed environment |
 
 ## Run
 
@@ -55,7 +56,13 @@ go test ./...
 
 ## Try it
 
-The login is a stub: it trusts the header `X-User-Id`. **Replace `currentUser` in `server.go` with your own login** before you deploy anything.
+The login is a placeholder. **Replace `currentUser` in `server.go` with your own login** before you deploy anything. Until you do, every app route answers `401` with the code `auth_not_configured`.
+
+For local testing only, start the server with `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1`. Then `currentUser` trusts the header `X-User-Id` as the signed-in user, and anyone can send that header. Never set the variable in a deployed environment:
+
+```sh
+LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1 go run .
+```
 
 Report a comment. Send the same `Idempotency-Key` again when you retry the same report:
 
@@ -101,7 +108,7 @@ curl -i -X POST localhost:8080/limenia/webhook \
 
 ### Reports
 
-- `source` is always `user`, and `reporter.externalUserId` comes from the login, never from the request body. The other fields (`reasonCategory`, `reasonText`, `goodFaith`, `subject`, `content`, `externalReportId`) are passed on. In a real app, load `subject` and `content` from your own database by ID instead of trusting what the app sends.
+- `source` is always `user`, and `reporter.externalUserId` comes from the login, never from the request body. The other fields (`reasonCategory`, `reasonText`, `goodFaith`, `content`, `externalReportId`) are passed on. Of `subject`, only `externalUserId` and `displayName` are passed on; `subject.identifiers` is never taken from the app (see `reportSubject` in `server.go`). In a real app, load `subject` and `content` from your own database by ID instead of trusting what the app sends.
 - `Idempotency-Key` is required by Limenia. The app should create one key per report, keep it, and resend it with every retry of that report. Without a key, this backend generates one; it then only protects its own retries. The key is returned in the `Idempotency-Key` response header.
 - Network errors, `429` and `5xx` are retried up to 5 times with backoff of 1, 2, 4 and 8 seconds, waiting at least `Retry-After`. A `Retry-After` above 30 seconds is passed on to the app instead. Other `4xx` are never retried.
 - Limenia's status, body (`application/problem+json` for errors) and `Retry-After` are passed on unchanged. If the report still fails, queue it and send it again within 24 hours with the same key.

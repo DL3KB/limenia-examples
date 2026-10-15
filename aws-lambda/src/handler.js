@@ -17,16 +17,21 @@ import { LimeniaClient, LimeniaUnavailableError } from "./limenia.js";
 import { verifySignature, WebhookSignatureError } from "./signature.js";
 
 // ---------------------------------------------------------------------------
-// AUTH STUB: REPLACE WITH YOUR LOGIN.
+// AUTH PLACEHOLDER: REPLACE WITH YOUR LOGIN.
 // With an API Gateway HTTP API and a JWT authorizer (e.g. Amazon Cognito) the
-// verified user ID is in the claims. The header X-User-Id is for trying the
-// example only; anyone can send it, so it is refused in production.
-// The ID must come from your login, never from the request body.
+// verified user ID is in the claims, and that is the only login this example
+// knows. Return the stable internal ID of the signed-in user from your own
+// session or token check; it must never come from the request body.
+//
+// The header X-User-Id is a fallback for local testing only. It is enabled only
+// by LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1, and anyone can send that header.
+// Never set the variable in a deployed environment. Without a JWT authorizer
+// and without the variable, every app route answers 401 auth_not_configured.
 // ---------------------------------------------------------------------------
-function currentUserId(event) {
+function currentUserId(event, insecureDevAuth) {
   const sub = event.requestContext?.authorizer?.jwt?.claims?.sub;
   if (sub) return String(sub);
-  if (process.env.NODE_ENV === "production") return null;
+  if (!insecureDevAuth) return null;
   const id = event.headers?.["x-user-id"];
   return id && id.length <= 128 ? id : null;
 }
@@ -71,11 +76,33 @@ function idempotencyKey(event, kind) {
   return fromApp && fromApp.length <= 200 ? fromApp : `${kind}-${randomUUID()}`;
 }
 
+/**
+ * The reported user, rebuilt from what the app sent: only externalUserId and displayName.
+ *
+ * Never forward identifiers from the app. To use ban evasion across apps, add
+ * subject.identifiers here from your own user record of the reported user
+ * (HMACs with your identifier key, see https://limenia.eu/docs/identifiers/).
+ */
+function reportSubject(raw) {
+  if (typeof raw?.externalUserId !== "string") return undefined;
+  const subject = { externalUserId: raw.externalUserId };
+  if (typeof raw.displayName === "string") subject.displayName = raw.displayName;
+  return subject;
+}
+
 export function createHandler({ env = process.env, limenia, actions = defaultActions, store } = {}) {
   // API Gateway HTTP APIs end requests after 30 s, so this uses a shorter timeout,
   // fewer attempts and a lower Retry-After limit than the other examples.
   limenia ??= new LimeniaClient({ baseUrl: env.LIMENIA_BASE_URL || "https://app.limenia.eu", apiKey: env.LIMENIA_API_KEY, timeoutMs: 12_000, maxAttempts: 2, maxWaitSeconds: 5 });
   const secrets = [env.LIMENIA_WEBHOOK_SECRET, env.LIMENIA_WEBHOOK_SECRET_PREVIOUS].filter(Boolean);
+  const insecureDevAuth = env.LIMENIA_EXAMPLE_INSECURE_DEV_AUTH === "1";
+  if (insecureDevAuth) {
+    console.warn(
+      JSON.stringify({
+        msg: "LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1: the X-User-Id header is trusted as the signed-in user. For local testing only. Anyone can send that header. Never set it in a deployed environment.",
+      }),
+    );
+  }
   let storePromise = store ? Promise.resolve(store) : null;
   const eventStore = () => (storePromise ??= env.LIMENIA_EVENTS_TABLE ? dynamoEventStore(env.LIMENIA_EVENTS_TABLE) : Promise.resolve(memoryEventStore()));
 
@@ -108,8 +135,12 @@ export function createHandler({ env = process.env, limenia, actions = defaultAct
     const path = event.rawPath;
     if (method === "POST" && path === "/limenia/webhook") return webhook(event);
 
-    const userId = currentUserId(event);
-    if (!userId) return problem(401, "unauthenticated", "Sign in first.");
+    const userId = currentUserId(event, insecureDevAuth);
+    if (!userId) {
+      return insecureDevAuth
+        ? problem(401, "unauthenticated", "Sign in first.")
+        : problem(401, "auth_not_configured", "No login configured: replace the auth placeholder with your own login.");
+    }
     let body = {};
     if (method === "POST") {
       try {
@@ -127,7 +158,7 @@ export function createHandler({ env = process.env, limenia, actions = defaultAct
         goodFaith: body.goodFaith, // Art. 16(2)(d) DSA, only for source "user"
         reporter: { externalUserId: userId }, // from the login, never from the app
         // Better: load the content and its author from your database by ID.
-        subject: body.subject,
+        subject: reportSubject(body.subject),
         content: body.content,
         externalReportId: body.externalReportId,
       };

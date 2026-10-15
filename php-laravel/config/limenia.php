@@ -12,4 +12,8 @@ return [
         env('LIMENIA_WEBHOOK_SECRET'),
         env('LIMENIA_WEBHOOK_SECRET_PREVIOUS'),
     ])),
+
+    // Local testing only: trust the X-User-Id header as the signed-in user.
+    // Anyone can send that header. Never set this in a deployed environment.
+    'insecure_dev_auth' => env('LIMENIA_EXAMPLE_INSECURE_DEV_AUTH') === '1',
 ];

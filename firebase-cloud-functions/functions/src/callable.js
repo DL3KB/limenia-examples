@@ -1,4 +1,4 @@
-// Helpers for the onCall functions: idempotency keys and error mapping.
+// Helpers for the onCall functions: idempotency keys, the reported user and error mapping.
 
 import { randomUUID } from "node:crypto";
 import { HttpsError } from "firebase-functions/v2/https";
@@ -11,6 +11,20 @@ import { LimeniaUnavailableError } from "./limenia.js";
 export function idempotencyKey(kind, fromApp) {
   if (typeof fromApp === "string" && fromApp.length > 0 && fromApp.length <= 200) return fromApp;
   return `${kind}-${randomUUID()}`;
+}
+
+/**
+ * The reported user, rebuilt from what the app sent: only externalUserId and displayName.
+ *
+ * Never forward identifiers from the app. To use ban evasion across apps, add
+ * subject.identifiers here from your own user record of the reported user
+ * (HMACs with your identifier key, see https://limenia.eu/docs/identifiers/).
+ */
+export function reportSubject(raw) {
+  if (typeof raw?.externalUserId !== "string") return undefined;
+  const subject = { externalUserId: raw.externalUserId };
+  if (typeof raw.displayName === "string") subject.displayName = raw.displayName;
+  return subject;
 }
 
 const CODES = {

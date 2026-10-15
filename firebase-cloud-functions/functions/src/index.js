@@ -10,7 +10,7 @@ import { defineSecret, defineString } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { actions } from "./actions.js";
-import { callLimenia, idempotencyKey } from "./callable.js";
+import { callLimenia, idempotencyKey, reportSubject } from "./callable.js";
 import { issueDeviceTicket, redeemDeviceTicket } from "./device-ticket.js";
 import { handleEvent } from "./events.js";
 import { LimeniaClient, LimeniaUnavailableError } from "./limenia.js";
@@ -46,7 +46,7 @@ export const submitReport = onCall({ secrets: [LIMENIA_API_KEY], timeoutSeconds:
     reporter: { externalUserId: uid }, // from the login, never from the app
     // The reported user (for content: its author). Better: read the content and its
     // author from Firestore by ID instead of trusting what the app sends.
-    subject: d.subject,
+    subject: reportSubject(d.subject),
     content: d.content,
     externalReportId: d.externalReportId,
   };

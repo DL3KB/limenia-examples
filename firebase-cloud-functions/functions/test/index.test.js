@@ -34,3 +34,23 @@ test("webhook verifies the signature over req.rawBody", async () => {
   const old = await call(mod.limeniaWebhook, { rawBody, signature: signPayload(rawBody, "whsec_test", now - 400) });
   assert.deepEqual(old, { status: 401, body: { code: "timestamp_out_of_range" } });
 });
+
+test("submitReport forwards only externalUserId and displayName of the subject, never identifiers", async () => {
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ reportId: "r1" }), { status: 201, headers: { "content-type": "application/json" } });
+  };
+  process.env.LIMENIA_API_KEY = "lm_test";
+  try {
+    const subject = { externalUserId: "u_2", displayName: "Eve", identifiers: { emailHmac: "abc", phoneHmac: "def" }, extra: "x" };
+    await mod.submitReport.run({ auth: { uid: "u_1" }, data: { reasonCategory: "spam", subject } });
+    await mod.submitReport.run({ auth: { uid: "u_1" }, data: { reasonCategory: "spam", subject: { identifiers: { emailHmac: "abc" } } } });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(sent[0].subject, { externalUserId: "u_2", displayName: "Eve" });
+  assert.deepEqual(sent[0].reporter, { externalUserId: "u_1" });
+  assert.equal(sent[1].subject, undefined);
+});

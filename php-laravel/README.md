@@ -18,7 +18,7 @@ The app never talks to Limenia directly and never sees the API key.
 |---|---|
 | `config/limenia.php` | Configuration from the environment |
 | `routes/limenia.php` | The routes above |
-| `app/Http/Controllers/LimeniaController.php` | Reports, status and device check, with the login stub |
+| `app/Http/Controllers/LimeniaController.php` | Reports, status and device check, with the login placeholder |
 | `app/Http/Controllers/LimeniaWebhookController.php` | Webhook receiver: signature, deduplication, dispatch |
 | `app/Limenia/LimeniaClient.php` | Small service class: HTTP requests with retries, device request hash |
 | `app/Limenia/WebhookSignature.php` | Verification of `Limenia-Signature`, plain PHP |
@@ -44,8 +44,9 @@ The app never talks to Limenia directly and never sees the API key.
    | `LIMENIA_API_KEY` | yes | API key of your app, from the Limenia dashboard |
    | `LIMENIA_WEBHOOK_SECRET` | yes | Webhook secret of your app |
    | `LIMENIA_WEBHOOK_SECRET_PREVIOUS` | no | The previous secret, only while you rotate it |
+   | `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH` | no | Set to `1` for local testing only: trusts the `X-User-Id` header as the signed-in user. Never set it in a deployed environment |
 
-4. **Replace the login stub.** `currentUser()` in `LimeniaController` trusts the header `X-User-Id` so you can try the example. Put the app routes behind your auth middleware (e.g. `auth:sanctum`) and return `$request->user()->getAuthIdentifier()` instead. Do not put the webhook route behind auth: its signature is the authentication.
+4. **Replace the login placeholder.** `currentUser()` in `LimeniaController` answers `401` with the code `auth_not_configured` on every app route until you plug in your own login. Put the app routes behind your auth middleware (e.g. `auth:sanctum`) and return `$request->user()->getAuthIdentifier()` instead. Do not put the webhook route behind auth: its signature is the authentication.
 
 ## Run
 
@@ -66,6 +67,8 @@ php tests/webhook_signature_test.php
 It checks the test vector (secret `whsec_test`, `t=1800000000`, body `{"id":"evt_1"}`), a wrong secret, rotation, old and future timestamps, a tampered body, two `v1` values and malformed headers.
 
 ## Try it
+
+For local testing only, set `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1` in your `.env`. Then `currentUser()` trusts the header `X-User-Id` as the signed-in user, and anyone can send that header. Never set the variable in a deployed environment. Without it, every app route below answers `401` with the code `auth_not_configured`.
 
 Report a comment. Send the same `Idempotency-Key` again when you retry the same report:
 
@@ -111,7 +114,7 @@ curl -i -X POST localhost:8000/api/limenia/webhook \
 
 ### Reports
 
-- `source` is always `user`, and `reporter.externalUserId` comes from the login, never from the request body. The other fields (`reasonCategory`, `reasonText`, `goodFaith`, `subject`, `content`, `externalReportId`) are passed on. In a real app, load `subject` and `content` from your own database by ID instead of trusting what the app sends.
+- `source` is always `user`, and `reporter.externalUserId` comes from the login, never from the request body. The other fields (`reasonCategory`, `reasonText`, `goodFaith`, `content`, `externalReportId`) are passed on. Of `subject`, only `externalUserId` and `displayName` are passed on; `subject.identifiers` is never taken from the app (see `reportSubject()` in `LimeniaController`). In a real app, load `subject` and `content` from your own database by ID instead of trusting what the app sends.
 - `Idempotency-Key` is required by Limenia. The app should create one key per report, keep it, and resend it with every retry of that report. Without a key, the controller generates one; it then only protects its own retries. The key is returned in the `Idempotency-Key` response header.
 - Network errors, `429` and `5xx` are retried up to 5 times with backoff of 1, 2, 4 and 8 seconds, waiting at least `Retry-After`. A `Retry-After` above 30 seconds is passed on to the app instead. Other `4xx` are never retried. Waiting blocks a PHP worker; for heavy traffic, send reports from a queued job instead.
 - Limenia's status, body (`application/problem+json` for errors) and `Retry-After` are passed on unchanged. If the report still fails, queue it and send it again within 24 hours with the same key.

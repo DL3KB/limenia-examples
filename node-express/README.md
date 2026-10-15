@@ -17,7 +17,7 @@ Files:
 - `src/signature.js`: verification of `Limenia-Signature`
 - `src/events.js`: what happens per event, with dedupe and ordering
 - `src/actions.js`: **placeholders** for your app (remove content, ban a user, notify)
-- `src/auth.js`: **auth stub, replace with your login**
+- `src/auth.js`: **auth placeholder, replace with your login**
 - `src/device.js`: request hash for the device check
 - `src/app.js`: the routes
 
@@ -40,12 +40,18 @@ npm test
 | `LIMENIA_WEBHOOK_SECRET` | Secret of your webhook |
 | `LIMENIA_WEBHOOK_SECRET_PREVIOUS` | Optional, the old secret while you rotate |
 | `PORT` | Default `3000` |
+| `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH` | Set to `1` for local testing only: trusts the `X-User-Id` header as the signed-in user. Never set it in a deployed environment |
 
 ## Try it
 
-The login is a stub: it takes the user from the header `X-User-Id`. **Replace `requireUser` in `src/auth.js` with your own login.** The stub refuses every request when `NODE_ENV=production`.
+The login is a placeholder. **Replace `requireUser` in `src/auth.js` with your own login.** Until you do, every app route answers `401` with the code `auth_not_configured`.
+
+For local testing only, start the server with `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1`. Then `requireUser` trusts the header `X-User-Id` as the signed-in user, and anyone can send that header. Never set the variable in a deployed environment.
 
 ```sh
+# Start the server for local testing
+LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1 npm start
+
 # Report a comment (the reporter is u_829, taken from the "login")
 curl -i -X POST localhost:3000/reports \
   -H 'Content-Type: application/json' -H 'X-User-Id: u_829' \
@@ -78,7 +84,7 @@ For a real delivery, expose the server with a tunnel (any HTTPS tunnel works), e
 
 ## How it behaves
 
-**Reports, complaints, review requests.** The backend builds the request from an allowlist of fields and sets the person from the login: `reporter.externalUserId`, `appellant.externalUserId`, `subject.externalUserId` of a review. `source` is always `user`, and only `reasonCategory`, `reasonText`, `goodFaith`, `subject`, `content` and `externalReportId` are passed on. The app should create one `Idempotency-Key` per report and send it again on every retry; without one the backend generates `report-<uuid>`, which only covers its own retries. The key used comes back in the response header `Idempotency-Key`.
+**Reports, complaints, review requests.** The backend builds the request from an allowlist of fields and sets the person from the login: `reporter.externalUserId`, `appellant.externalUserId`, `subject.externalUserId` of a review. `source` is always `user`, and only `reasonCategory`, `reasonText`, `goodFaith`, `content` and `externalReportId` are passed on. Of `subject`, only `externalUserId` and `displayName` are passed on; `subject.identifiers` is never taken from the app (see `reportSubject` in `src/app.js`). The app should create one `Idempotency-Key` per report and send it again on every retry; without one the backend generates `report-<uuid>`, which only covers its own retries. The key used comes back in the response header `Idempotency-Key`.
 
 **Errors.** Limenia's status, its `application/problem+json` body and `Retry-After` go to the app unchanged, so the app can show field errors (`errors`), `reporterWarning` and `reporter_suspended` with `suspendedUntil`. No answer at all becomes `502 limenia_unreachable`. A `401` from Limenia means the backend's API key is wrong; the app must not sign the user out because of it.
 

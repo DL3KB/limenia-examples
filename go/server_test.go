@@ -103,9 +103,13 @@ func (h *harness) do(method, path, body string, header map[string]string) *httpt
 	return rec
 }
 
+// devAuth turns on the X-User-Id fallback of currentUser, which is off by default.
+func devAuth(t *testing.T) { t.Setenv(insecureDevAuthEnv, "1") }
+
 const created = `{"reportId":"r1","caseId":"c1","caseCreated":true}`
 
 func TestReportSetsReporterAndPassesKey(t *testing.T) {
+	devAuth(t)
 	h := newHarness(respond(201, nil, created))
 	rec := h.do("POST", "/reports",
 		`{"reasonCategory":"spam","source":"system","reporter":{"externalUserId":"someone_else"},"content":{"externalContentId":"c_1","contentType":"comment"}}`,
@@ -125,14 +129,58 @@ func TestReportSetsReporterAndPassesKey(t *testing.T) {
 	}
 }
 
+func TestReportForwardsOnlyExternalUserIDAndDisplayNameOfTheSubject(t *testing.T) {
+	devAuth(t)
+	h := newHarness(respond(201, nil, created), respond(201, nil, created))
+	user := map[string]string{"X-User-Id": "u_1"}
+	h.do("POST", "/reports",
+		`{"reasonCategory":"spam","subject":{"externalUserId":"u_2","displayName":"Eve","identifiers":{"emailHmac":"abc","phoneHmac":"def"},"extra":"x"}}`, user)
+	h.do("POST", "/reports", `{"reasonCategory":"spam","subject":{"identifiers":{"emailHmac":"abc"}}}`, user)
+
+	var sent map[string]any
+	json.Unmarshal([]byte(h.fake.bodies[0]), &sent)
+	if want := map[string]any{"externalUserId": "u_2", "displayName": "Eve"}; !reflect.DeepEqual(sent["subject"], want) {
+		t.Fatalf("subject %v, want %v", sent["subject"], want)
+	}
+	sent = nil
+	json.Unmarshal([]byte(h.fake.bodies[1]), &sent)
+	if _, ok := sent["subject"]; ok {
+		t.Fatalf("subject without externalUserId must be omitted, got %v", sent["subject"])
+	}
+}
+
 func TestReportRequiresLogin(t *testing.T) {
+	devAuth(t)
 	h := newHarness()
-	if rec := h.do("POST", "/reports", `{}`, nil); rec.Code != 401 {
+	if rec := h.do("POST", "/reports", `{}`, nil); rec.Code != 401 || !strings.Contains(rec.Body.String(), `"unauthenticated"`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestWithoutDevAuthEveryAppRouteAnswersAuthNotConfigured(t *testing.T) {
+	t.Setenv(insecureDevAuthEnv, "")
+	h := newHarness()
+	user := map[string]string{"X-User-Id": "u_1"}
+	for _, route := range [][2]string{
+		{"POST", "/reports"}, {"GET", "/me/moderation-status"}, {"POST", "/devices/request-hash"}, {"POST", "/devices/check"},
+	} {
+		rec := h.do(route[0], route[1], `{"reasonCategory":"spam"}`, user)
+		if rec.Code != 401 || !strings.Contains(rec.Body.String(), `"code":"auth_not_configured"`) {
+			t.Fatalf("%s %s: got %d %s", route[0], route[1], rec.Code, rec.Body)
+		}
+	}
+	// Only the exact value "1" turns the fallback on.
+	t.Setenv(insecureDevAuthEnv, "true")
+	if rec := h.do("POST", "/reports", `{}`, user); rec.Code != 401 {
 		t.Fatalf("got %d", rec.Code)
+	}
+	if len(h.fake.requests) != 0 {
+		t.Fatalf("sent %d requests to Limenia", len(h.fake.requests))
 	}
 }
 
 func TestReportRetriesWithSameKeyAndRespectsRetryAfter(t *testing.T) {
+	devAuth(t)
 	h := newHarness(
 		networkError,
 		respond(429, http.Header{"Retry-After": {"5"}}, `{"code":"rate_limited"}`),
@@ -159,6 +207,7 @@ func TestReportRetriesWithSameKeyAndRespectsRetryAfter(t *testing.T) {
 }
 
 func TestReportForwardsProblemAndRetryAfter(t *testing.T) {
+	devAuth(t)
 	problem := `{"type":"about:blank","title":"Too Many Requests","status":429,"code":"rate_limited"}`
 	h := newHarness(respond(429, http.Header{"Retry-After": {"120"}, "Content-Type": {"application/problem+json"}}, problem))
 	rec := h.do("POST", "/reports", `{"reasonCategory":"spam"}`, map[string]string{"X-User-Id": "u_1"})
@@ -173,6 +222,7 @@ func TestReportForwardsProblemAndRetryAfter(t *testing.T) {
 }
 
 func TestReportDoesNotRetry4xx(t *testing.T) {
+	devAuth(t)
 	h := newHarness(respond(400, nil, `{"code":"validation_failed"}`))
 	if rec := h.do("POST", "/reports", `{"reasonCategory":"x"}`, map[string]string{"X-User-Id": "u_1"}); rec.Code != 400 {
 		t.Fatalf("got %d", rec.Code)
@@ -183,6 +233,7 @@ func TestReportDoesNotRetry4xx(t *testing.T) {
 }
 
 func TestStatusEncodesTheUserID(t *testing.T) {
+	devAuth(t)
 	h := newHarness(respond(200, nil, `{"externalUserId":"a/b c","status":"active"}`))
 	rec := h.do("GET", "/me/moderation-status", "", map[string]string{"X-User-Id": "a/b c"})
 	if rec.Code != 200 {
@@ -194,6 +245,7 @@ func TestStatusEncodesTheUserID(t *testing.T) {
 }
 
 func TestDeviceCheckForwardsTokenAndHash(t *testing.T) {
+	devAuth(t)
 	result := `{"checkId":"k1","platform":"android","status":"evaluated","deviceFlag":"none","deviceAction":"none","subject":{"externalUserId":"u_1","status":"active"},"test":false}`
 	h := newHarness(respond(200, nil, result))
 	user := map[string]string{"X-User-Id": "u_1"}
@@ -212,6 +264,7 @@ func TestDeviceCheckForwardsTokenAndHash(t *testing.T) {
 }
 
 func TestDeviceCheckFailsOpenWithoutRetry(t *testing.T) {
+	devAuth(t)
 	h := newHarness(respond(503, nil, ""))
 	rec := h.do("POST", "/devices/check", `{"platform":"ios","token":"tok"}`, map[string]string{"X-User-Id": "u_1"})
 	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"deviceFlag":"unknown","status":"unevaluated"}` {

@@ -9,7 +9,7 @@ One Lambda function (Node.js 20, no dependencies) behind a Lambda Function URL o
 | `POST /devices/request-hash`, `POST /devices/check` | `POST /v1/devices/check` | Request hash for `limenia_device`, signed ticket instead of server state, fail-open |
 | `POST /limenia/webhook` | (called by Limenia) | Raw body incl. base64 decoding, signature, dedupe (memory or DynamoDB), all event types |
 
-Files in `src/`: `handler.js` (routing, **auth stub**), `limenia.js` (HTTP client with retries), `signature.js`, `events.js`, `actions.js` (**placeholders** for your app), `event-store.js`, `device-ticket.js`.
+Files in `src/`: `handler.js` (routing, **auth placeholder**), `limenia.js` (HTTP client with retries), `signature.js`, `events.js`, `actions.js` (**placeholders** for your app), `event-store.js`, `device-ticket.js`.
 
 ## Setup
 
@@ -29,6 +29,7 @@ Environment variables of the function (see `.env.example`):
 | `LIMENIA_WEBHOOK_SECRET_PREVIOUS` | Optional, the old secret while you rotate |
 | `DEVICE_CHECK_SECRET` | Signs device check tickets; any random string |
 | `LIMENIA_EVENTS_TABLE` | Optional DynamoDB table for processed event IDs |
+| `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH` | Set to `1` for local testing only: trusts the `X-User-Id` header as the signed-in user. Never set it on a deployed function |
 
 Plain environment variables are visible to everyone who can read the function's configuration. For production, load the key and the secrets from AWS Secrets Manager or SSM Parameter Store (e.g. with the Parameters and Secrets Lambda extension) and keep them out of logs.
 
@@ -50,7 +51,7 @@ aws lambda create-function --function-name limenia-example \
 Then pick one of two ways in front of it:
 
 - **API Gateway HTTP API (recommended).** Routes `POST /reports`, `GET /me/moderation-status`, `POST /devices/request-hash` and `POST /devices/check` with a JWT authorizer (e.g. Amazon Cognito); the handler takes the user from `requestContext.authorizer.jwt.claims.sub`. Route `POST /limenia/webhook` without an authorizer: the signature is its authentication. Use the `$default` stage, or the stage name becomes part of the path.
-- **Function URL** with auth type `NONE`. Simple, but every route is public, so replace the auth stub in `handler.js` with your own token check first.
+- **Function URL** with auth type `NONE`. Simple, but every route is public, so replace the auth placeholder in `handler.js` with your own token check first.
 
 Enter `https://<your-api>/limenia/webhook` as the webhook URL in the Limenia dashboard and use its test button.
 
@@ -68,7 +69,9 @@ and allow the role `dynamodb:GetItem` and `dynamodb:PutItem` on it.
 
 ## Try it
 
-The login is a stub: without a JWT authorizer it takes the user from the header `X-User-Id` (refused when `NODE_ENV=production`). **Replace `currentUserId` in `src/handler.js` with your own login.**
+The login is a placeholder. Behind a JWT authorizer the handler takes the user from the verified claims. Without one, every app route answers `401` with the code `auth_not_configured`. **Replace `currentUserId` in `src/handler.js` with your own login.**
+
+For local testing only (for example in a local invocation of the handler), set `LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1`. Then, without authorizer claims, the handler trusts the header `X-User-Id` as the signed-in user, and anyone can send that header. Never set the variable on a deployed function. The `X-User-Id` examples below work only that way; behind a JWT authorizer send your access token instead (`-H "Authorization: Bearer $TOKEN"`).
 
 ```sh
 URL=https://<your-api>
@@ -93,7 +96,7 @@ curl -i -X POST "$URL/limenia/webhook" -H 'content-type: application/json' -H "l
 
 **Webhook.** 300 s tolerance, any `v1` value, constant-time comparison, current and previous secret. Seen event IDs are acknowledged with `204`; an event is marked processed only after handling. `decision.created` is applied per `action`, never changing the account for decisions with `reviewId`; `restore` follows `restoreScope`. `test.ping` and unknown types get `204`, a failure `503` (Limenia retries), all within 8 s (Limenia waits 10 s). For ordering by `decidedAt`, see the node-express example.
 
-**Reports.** `source` is always `user`, the reporter comes from the login, and only `reasonCategory`, `reasonText`, `goodFaith`, `subject`, `content` and `externalReportId` are passed on. The app's `Idempotency-Key` is passed through, or `report-<uuid>` is generated; the key used comes back in the response header. Limenia's status, problem body and `Retry-After` reach the app unchanged; no answer at all becomes `502 limenia_unreachable`. A `401` from Limenia means the API key is wrong, not that the user is signed out.
+**Reports.** `source` is always `user`, the reporter comes from the login, and only `reasonCategory`, `reasonText`, `goodFaith`, `content` and `externalReportId` are passed on. Of `subject`, only `externalUserId` and `displayName` are passed on; `subject.identifiers` is never taken from the app (see `reportSubject` in `src/handler.js`). The app's `Idempotency-Key` is passed through, or `report-<uuid>` is generated; the key used comes back in the response header. Limenia's status, problem body and `Retry-After` reach the app unchanged; no answer at all becomes `502 limenia_unreachable`. A `401` from Limenia means the API key is wrong, not that the user is signed out.
 
 **Retries.** The other examples try up to five times (1, 2, 4, 8 s pause) and wait for a `Retry-After` of up to 30 s. An API Gateway HTTP API ends requests after 30 s, so this one uses a 12 s timeout per attempt, two attempts, and waits for `Retry-After` up to 5 s; a longer one goes back to the app with status `429` and the header. Behind a Function URL you can raise the limits in `createHandler` (and the function timeout).
 

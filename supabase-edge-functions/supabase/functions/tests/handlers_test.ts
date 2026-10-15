@@ -130,6 +130,23 @@ Deno.test("report: reporter from the login, key passed through and echoed, probl
   assertEquals((await handler(new Request("http://localhost/limenia-reports", { method: "POST", body: "{}" }))).status, 401);
 });
 
+Deno.test("report: only externalUserId and displayName of the subject are forwarded, never identifiers", async () => {
+  const { calls, limenia } = fakeLimenia({ status: 201, body: {}, retryAfter: null });
+  const handler = createReportsHandler({ limenia, userFromRequest });
+  const send = (subject: unknown) =>
+    handler(
+      new Request("http://localhost/limenia-reports", {
+        method: "POST",
+        headers: { authorization: "Bearer u_1" },
+        body: JSON.stringify({ reasonCategory: "spam", subject }),
+      }),
+    );
+  await send({ externalUserId: "u_2", displayName: "Eve", identifiers: { emailHmac: "abc", phoneHmac: "def" }, extra: "x" });
+  await send({ identifiers: { emailHmac: "abc" } });
+  assertEquals((calls[0].body as Record<string, unknown>).subject, { externalUserId: "u_2", displayName: "Eve" });
+  assertEquals((calls[1].body as Record<string, unknown>).subject, undefined);
+});
+
 Deno.test("devices: ticket of the same user, sent once without retry, fail open", async () => {
   const { calls, limenia } = fakeLimenia({ status: 503, body: null, retryAfter: null });
   const handler = createDevicesHandler({ limenia, userFromRequest, deviceSecret: "s" });

@@ -4,16 +4,17 @@ import { createHandler } from "../src/handler.js";
 import { signPayload } from "../src/signature.js";
 
 const SECRET = "whsec_test";
-const env = { LIMENIA_WEBHOOK_SECRET: SECRET, DEVICE_CHECK_SECRET: "devsecret", LIMENIA_API_KEY: "k" };
+// The X-User-Id fallback is off by default; most tests need it on.
+const env = { LIMENIA_WEBHOOK_SECRET: SECRET, DEVICE_CHECK_SECRET: "devsecret", LIMENIA_API_KEY: "k", LIMENIA_EXAMPLE_INSECURE_DEV_AUTH: "1" };
 
-function setup(limeniaResult = { status: 201, body: {}, retryAfter: null }) {
+function setup(limeniaResult = { status: 201, body: {}, retryAfter: null }, handlerEnv = env) {
   const calls = [];
   const done = [];
   const limenia = { request: async (method, path, options = {}) => (calls.push({ method, path, ...options }), limeniaResult) };
   const actions = new Proxy({}, { get: (_, name) => async (...args) => done.push([name, ...args]) });
   const seen = new Set();
   const store = { isProcessed: async (id) => seen.has(id), markProcessed: async (id) => void seen.add(id) };
-  return { calls, done, handler: createHandler({ env, limenia, actions, store }) };
+  return { calls, done, handler: createHandler({ env: handlerEnv, limenia, actions, store }) };
 }
 
 const httpEvent = (method, rawPath, { body, headers = {}, base64 = false } = {}) => ({
@@ -73,11 +74,43 @@ test("report: reporter from the login, key echoed, problem and Retry-After forwa
 
 test("app routes need a user; JWT authorizer claims win", async () => {
   const { handler, calls } = setup({ status: 200, body: { externalUserId: "cog_1", status: "active" }, retryAfter: null });
-  assert.equal((await handler(httpEvent("GET", "/me/moderation-status"))).statusCode, 401);
+  const missing = await handler(httpEvent("GET", "/me/moderation-status"));
+  assert.equal(missing.statusCode, 401);
+  assert.equal(JSON.parse(missing.body).code, "unauthenticated");
   const e = httpEvent("GET", "/me/moderation-status", { headers: { "x-user-id": "spoofed" } });
   e.requestContext.authorizer = { jwt: { claims: { sub: "cog_1" } } };
   assert.equal((await handler(e)).statusCode, 200);
   assert.equal(calls[0].path, "/v1/subjects/cog_1/status");
+});
+
+test("without LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1 the header is ignored: 401 auth_not_configured, nothing sent to Limenia", async () => {
+  const headers = { "x-user-id": "u_1" };
+  const routes = [["POST", "/reports"], ["GET", "/me/moderation-status"], ["POST", "/devices/request-hash"], ["POST", "/devices/check"]];
+  for (const flag of [undefined, "", "true"]) {
+    const { handler, calls } = setup(undefined, { ...env, LIMENIA_EXAMPLE_INSECURE_DEV_AUTH: flag });
+    for (const [method, path] of routes) {
+      const res = await handler(httpEvent(method, path, { body: method === "POST" ? "{}" : undefined, headers }));
+      assert.equal(res.statusCode, 401, `${method} ${path}`);
+      assert.equal(res.headers["content-type"], "application/problem+json");
+      assert.equal(JSON.parse(res.body).code, "auth_not_configured");
+    }
+    assert.equal(calls.length, 0);
+  }
+  // A verified JWT authorizer still works without the flag.
+  const { handler, calls } = setup({ status: 200, body: {}, retryAfter: null }, { ...env, LIMENIA_EXAMPLE_INSECURE_DEV_AUTH: undefined });
+  const e = httpEvent("GET", "/me/moderation-status");
+  e.requestContext.authorizer = { jwt: { claims: { sub: "cog_1" } } };
+  assert.equal((await handler(e)).statusCode, 200);
+  assert.equal(calls[0].path, "/v1/subjects/cog_1/status");
+});
+
+test("report: only externalUserId and displayName of the subject are forwarded, never identifiers", async () => {
+  const { handler, calls } = setup();
+  const send = (subject) => handler(httpEvent("POST", "/reports", { body: JSON.stringify({ reasonCategory: "spam", subject }), headers: { "x-user-id": "u_1" } }));
+  await send({ externalUserId: "u_2", displayName: "Eve", identifiers: { emailHmac: "abc", phoneHmac: "def" }, extra: "x" });
+  await send({ identifiers: { emailHmac: "abc" } });
+  assert.deepEqual(calls[0].body.subject, { externalUserId: "u_2", displayName: "Eve" });
+  assert.equal(calls[1].body.subject, undefined);
 });
 
 test("device check: ticket of the same user, sent once, fail open", async () => {

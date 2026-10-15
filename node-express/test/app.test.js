@@ -20,6 +20,7 @@ const limenia = {
 let server;
 let base;
 before(async () => {
+  process.env.LIMENIA_EXAMPLE_INSECURE_DEV_AUTH = "1"; // the X-User-Id fallback is off by default
   server = createApp({ limenia, webhookSecrets: [SECRET], actions }).listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -116,6 +117,42 @@ test("report: reporter from the login, Idempotency-Key passed through and echoed
 test("report: requires a login", async () => {
   const res = await fetch(`${base}/reports`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   assert.equal(res.status, 401);
+  assert.equal((await res.json()).code, "unauthenticated");
+});
+
+test("without LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1 every app route answers 401 auth_not_configured and sends nothing to Limenia", async () => {
+  limeniaCalls.length = 0;
+  const flag = process.env.LIMENIA_EXAMPLE_INSECURE_DEV_AUTH;
+  try {
+    for (const value of [undefined, "", "true"]) {
+      if (value === undefined) delete process.env.LIMENIA_EXAMPLE_INSECURE_DEV_AUTH;
+      else process.env.LIMENIA_EXAMPLE_INSECURE_DEV_AUTH = value;
+      for (const [method, path] of [["POST", "/reports"], ["GET", "/me/moderation-status"], ["POST", "/appeals"], ["POST", "/reviews"], ["POST", "/devices/request-hash"], ["POST", "/devices/check"]]) {
+        const res = await fetch(`${base}${path}`, { method, headers: { "Content-Type": "application/json", "X-User-Id": "u_1" }, body: method === "POST" ? "{}" : undefined });
+        assert.equal(res.status, 401, `${method} ${path}`);
+        assert.match(res.headers.get("content-type"), /application\/problem\+json/);
+        assert.equal((await res.json()).code, "auth_not_configured");
+      }
+    }
+  } finally {
+    process.env.LIMENIA_EXAMPLE_INSECURE_DEV_AUTH = flag;
+  }
+  assert.equal(limeniaCalls.length, 0);
+});
+
+test("report: only externalUserId and displayName of the subject are forwarded, never identifiers", async () => {
+  limeniaCalls.length = 0;
+  nextLimeniaResult = { status: 201, body: {}, retryAfter: null };
+  const send = (subject) =>
+    fetch(`${base}/reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "u_1" },
+      body: JSON.stringify({ reasonCategory: "spam", subject }),
+    });
+  await send({ externalUserId: "u_2", displayName: "Eve", identifiers: { emailHmac: "abc", phoneHmac: "def" }, extra: "x" });
+  await send({ identifiers: { emailHmac: "abc" } });
+  assert.deepEqual(limeniaCalls[0].body.subject, { externalUserId: "u_2", displayName: "Eve" });
+  assert.equal(limeniaCalls[1].body.subject, undefined);
 });
 
 test("status: only for the signed-in user", async () => {

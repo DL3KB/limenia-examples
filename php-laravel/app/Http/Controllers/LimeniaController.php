@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Limenia\LimeniaClient;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response as LimeniaResponse;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -17,8 +18,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class LimeniaController extends Controller
 {
-    /** Fields the app may set in a report. source and reporter are set here. */
-    private const REPORT_FIELDS = ['reasonCategory', 'reasonText', 'goodFaith', 'subject', 'content', 'externalReportId'];
+    /** Fields the app may set in a report. source and reporter are set here, subject is rebuilt by reportSubject(). */
+    private const REPORT_FIELDS = ['reasonCategory', 'reasonText', 'goodFaith', 'content', 'externalReportId'];
 
     public function __construct(private readonly LimeniaClient $limenia)
     {
@@ -39,6 +40,12 @@ class LimeniaController extends Controller
             if (property_exists($input, $field)) {
                 $report->{$field} = $input->{$field};
             }
+        }
+        // The reported user (for content: its author). Better: load it from your
+        // own database by ID instead of trusting what the app sends.
+        $subject = $this->reportSubject($input->subject ?? null);
+        if ($subject !== null) {
+            $report->subject = $subject;
         }
         $report->source = 'user';
         $report->reporter = ['externalUserId' => $userId]; // from the login, never from the body
@@ -129,17 +136,54 @@ class LimeniaController extends Controller
     }
 
     /**
-     * REPLACE WITH YOUR LOGIN. This stub trusts an X-User-Id header so the
-     * example runs without an auth system. With Sanctum, for example:
+     * REPLACE WITH YOUR LOGIN. Return the stable internal ID of the signed-in
+     * user, the ID you also use as externalUserId, from your session or token
+     * check. With Sanctum, for example:
      * return (string) $request->user()->getAuthIdentifier();
-     * Return the stable internal ID you also use as externalUserId.
+     *
+     * The X-User-Id fallback below is for local testing only. It is enabled
+     * only by LIMENIA_EXAMPLE_INSECURE_DEV_AUTH=1, and anyone can send that
+     * header. Never set the variable in a deployed environment. Without it,
+     * every app route answers 401 auth_not_configured.
      */
     private function currentUser(Request $request): string
     {
+        if (config('limenia.insecure_dev_auth') !== true) {
+            throw new HttpResponseException($this->problem(
+                401,
+                'auth_not_configured',
+                'No login configured: replace the auth placeholder with your own login.',
+            ));
+        }
         $userId = (string) $request->header('X-User-Id');
-        abort_if($userId === '', 401, 'Not signed in');
+        if ($userId === '') {
+            throw new HttpResponseException($this->problem(401, 'unauthenticated', 'Not signed in'));
+        }
 
         return $userId;
+    }
+
+    /**
+     * The reported user, rebuilt from what the app sent: only externalUserId
+     * and displayName are taken over.
+     *
+     * Never forward identifiers from the app. To use ban evasion across apps,
+     * add subject.identifiers here from your own user record of the reported
+     * user (HMACs with your identifier key, see https://limenia.eu/docs/identifiers/).
+     *
+     * @return array<string, string>|null
+     */
+    private function reportSubject(mixed $raw): ?array
+    {
+        if (! $raw instanceof \stdClass || ! is_string($raw->externalUserId ?? null)) {
+            return null;
+        }
+        $subject = ['externalUserId' => $raw->externalUserId];
+        if (is_string($raw->displayName ?? null)) {
+            $subject['displayName'] = $raw->displayName;
+        }
+
+        return $subject;
     }
 
     /** Passes Limenia's status, body (JSON or problem+json) and Retry-After on. */
